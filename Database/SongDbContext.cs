@@ -6,6 +6,7 @@ namespace MusicPlayerSyncInterface.Database;
 
 public class SongDbContext : DbContext
 {
+    public string DbStatus { get; private set; } = "Not connected";
     public DbSet<UpvotedSong> UpvotedSongs { get; set; }
     public DbSet<SongHistoryEntry> SongHistoryEntries { get; set; }
 
@@ -30,6 +31,7 @@ public class SongDbContext : DbContext
         if (Environment.GetEnvironmentVariable("DB_PROVIDER") == "postgres")
         {
             options.UseNpgsql(Environment.GetEnvironmentVariable("POSTGRES_DB_ACCESS"));
+            DbStatus = "Using PostgreSQL DB";
         }
         else if (Environment.GetEnvironmentVariable("DB_PROVIDER") == "sqlite" || string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DB_PROVIDER")))
         {
@@ -37,6 +39,7 @@ public class SongDbContext : DbContext
             var sqlitePath = (Environment.GetEnvironmentVariable("MUSIC_PLAYER_SQLITE_DB_PATH") ?? exePath) + "song.db";
 
             options.UseSqlite($"Data Source={sqlitePath}");
+            DbStatus = $"Using SQLite DB at {sqlitePath}";
         }
         else
         {
