@@ -23,7 +23,8 @@ public class SongDbContext : DbContext
         modelBuilder.Entity<SongHistoryEntry>()
             .HasOne(s => s.UpvotedSong)
             .WithMany() // No navigation property back to SongHistoryEntry
-            .HasForeignKey(s => s.SongId);
+            .HasForeignKey(s => s.SongId)
+            .OnDelete(DeleteBehavior.NoAction);
     }
 
     protected override void OnConfiguring(DbContextOptionsBuilder options)
