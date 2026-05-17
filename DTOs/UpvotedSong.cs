@@ -8,6 +8,8 @@ public class UpvotedSong(string Name, float Score, int Streak, int TotalLikes, i
     public Guid SongId { get; set; } = Guid.NewGuid();
 
     public string UserId { get; set; } = UserId;
+    [ForeignKey("UserId"), JsonIgnore]
+    public User? User { get; set; } = null;
     /// <summary>
     /// This refers simply to the filename of the song including the extension, so like "Cool Artist - Nice Song.mp3".
     /// </summary>
