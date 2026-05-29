@@ -8,4 +8,4 @@ Both:     DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./bin/Debug/net8.0-wind
 
 Debug MusicPlayerSyncServer
 DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./ dotnet ef database update
-DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./ KEYCLOAK_REALM_URL=https://cloak.dobiko.net/realms/main KEYCLOAK_CLIENT_ID=music-player-sync dotnet run
+DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./ AUTH_BACKEND_REALM_URL=https://cloak.dobiko.net/realms/main AUTH_BACKEND_CLIENT_ID=music-player-sync dotnet run
