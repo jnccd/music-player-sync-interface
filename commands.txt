@@ -6,6 +6,11 @@ Debug:    DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./bin/Debug/net8.0-wind
 Release:  DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./bin/Release/net8.0-windows7.0/ dotnet ef database update
 Both:     DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./bin/Debug/net8.0-windows7.0/ dotnet ef database update && DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./bin/Release/net8.0-windows7.0/ dotnet ef database update
 
+Update MusicPlayerAvaloniaPort
+Debug:    DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./bin/Debug/net10.0/Persistence/ dotnet ef database update
+Release:  DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./bin/Release/net10.0/Persistence/ dotnet ef database update
+Both:     DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./bin/Debug/net10.0/Persistence/ dotnet ef database update && DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./bin/Release/net10.0/Persistence/ dotnet ef database update
+
 Debug MusicPlayerSyncServer
 DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./ dotnet ef database update
 DB_PROVIDER=sqlite MUSIC_PLAYER_SQLITE_DB_PATH=./ AUTH_BACKEND_REALM_URL=https://cloak.dobiko.net/realms/main AUTH_BACKEND_CLIENT_ID=music-player-sync dotnet run
