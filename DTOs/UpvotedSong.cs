@@ -22,6 +22,9 @@ public class UpvotedSong(string Name, float Score, int Streak, int TotalLikes, i
     public int TotalLikes { get; set; } = TotalLikes;
     public int TotalDislikes { get; set; } = TotalDislikes;
     public DateTimeOffset? DateAdded { get; set; } = DateAdded;
+    /// <summary>
+    /// This is either above 0 for an analyzed song or if uninitialized its -1.
+    /// </summary>
     public float Volume { get; set; } = Volume;
 
     [NotMapped, JsonIgnore]
