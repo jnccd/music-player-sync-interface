@@ -1,3 +1,3 @@
 namespace MusicPlayerSyncInterface.DTOs.Composites;
 
-public record SyncInitRequest(User[] users, UpvotedSong[] songs, SongHistoryEntry[] historyEntries);
+public record SyncInitRequest(User[] Users, UpvotedSong[] Songs, SongHistoryEntry[] HistoryEntries);
