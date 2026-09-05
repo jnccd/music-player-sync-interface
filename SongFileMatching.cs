@@ -49,17 +49,28 @@ public static class SongFileMatching
         a.Name == b.Name && a.Artist == b.Artist && a.Album == b.Album;
 
     /// <summary>
+    /// True when the row carries user-built song data that is expensive (or impossible) to recreate:
+    /// a score history, likes/dislikes, a streak, or an analyzed volume. Such rows must never be the
+    /// row dropped by a merge - mp3 metadata can be copied onto them later, the data cannot.
+    /// </summary>
+    public static bool CarriesSongData(UpvotedSong entry) =>
+        entry.TotalLikes != 0 || entry.TotalDislikes != 0 || entry.Streak != 0 || entry.Score != 0f || entry.Volume > 0f;
+
+    /// <summary>
     /// Chooses the entry of a group of entries that all belong to one and the same song that should be
     /// kept (and returned when the group is resolved as one song). Deterministic so the server, the
     /// clients and the file matching all agree on the same row:
-    /// 1. Entries carrying exactly the album/artist of the file the song was matched against win
-    ///    (only when fileAlbum/fileArtists are given, i.e. an actual song file arbitrated the group;
-    ///    entries without album/artist metadata are catch-alls that can never prove identity).
-    /// 2. Entries of a synced account (UserId != "") win over purely local entries (UserId == ""),
-    ///    since only synced entries can ever be voted on through the server.
-    /// 3. Higher score wins (it holds the most up-to-date vote history).
-    /// 4. Older DateAdded wins (ties and nulls: an entry with a date beats one without, then oldest).
-    /// 5. Smallest SongId wins as a last resort.
+    /// 1. Entries carrying user-built data (score, likes/dislikes, streak, analyzed volume) win. Such
+    ///    data is accumulated from user input over time and cannot be recreated, while the album/artist
+    ///    metadata of the arbitrating file can be copied onto the winner afterwards.
+    /// 2. Among data-carrying entries: more votes first, then a bigger streak, then an analyzed volume.
+    /// 3. Among entries without data: those carrying exactly the album/artist of the file the song was
+    ///    matched against win (only when fileAlbum/fileArtists are given), so fresh duplicates keep the
+    ///    properly tagged entry.
+    /// 4. Entries of a synced account (UserId != "") win over purely local entries (UserId == "").
+    /// 5. Higher score wins.
+    /// 6. Older DateAdded wins (ties and nulls: an entry with a date beats one without, then oldest).
+    /// 7. Smallest SongId wins as a last resort.
     /// Returns null when no entries are given.
     /// </summary>
     public static UpvotedSong? ChooseCanonicalEntry(IEnumerable<UpvotedSong> sameSongEntries, string? fileAlbum = null, string? fileArtists = null)
@@ -75,29 +86,50 @@ public static class SongFileMatching
 
     static int CompareCanonical(UpvotedSong a, UpvotedSong b, string? fileAlbum = null, string? fileArtists = null)
     {
-        // 1. Entries whose tags are exactly the tags of the arbitrating file first (a metadata-less
-        //    entry cannot prove it is the file, an entry with the exact tags can).
-        if (fileAlbum != null && fileArtists != null)
+        // 1. Rows carrying user data always win over rows without it.
+        bool aData = CarriesSongData(a);
+        bool bData = CarriesSongData(b);
+        if (aData != bData)
+            return aData ? -1 : 1;
+
+        if (aData)
         {
+            // 2. Both carry data: more votes, then the bigger streak, then an analyzed volume.
+            int activityComparison = (b.TotalLikes + b.TotalDislikes).CompareTo(a.TotalLikes + a.TotalDislikes);
+            if (activityComparison != 0)
+                return activityComparison;
+            int streakComparison = Math.Abs(b.Streak).CompareTo(Math.Abs(a.Streak));
+            if (streakComparison != 0)
+                return streakComparison;
+            int volumeComparison = (b.Volume > 0f).CompareTo(a.Volume > 0f);
+            if (volumeComparison != 0)
+                return volumeComparison;
+        }
+        else if (fileAlbum != null && fileArtists != null)
+        {
+            // 3. Neither carries data: entries whose tags are exactly the tags of the arbitrating file
+            //    win (a metadata-less entry cannot prove it is the file, an entry with the exact tags
+            //    can) - fresh duplicates keep the properly tagged entry.
             bool aExact = TagsEqual(a.Artist, a.Album, fileArtists, fileAlbum);
             bool bExact = TagsEqual(b.Artist, b.Album, fileArtists, fileAlbum);
             int exactComparison = bExact.CompareTo(aExact);
             if (exactComparison != 0)
                 return exactComparison;
         }
-        // 2. Synced account rows first (UserId == "" marks purely local, not yet synced rows).
+
+        // 4. Synced account rows first (UserId == "" marks purely local, not yet synced rows).
         int syncedComparison = string.IsNullOrEmpty(a.UserId).CompareTo(string.IsNullOrEmpty(b.UserId));
         if (syncedComparison != 0)
             return syncedComparison;
-        // 3. Higher score first.
+        // 5. Higher score first.
         int scoreComparison = b.Score.CompareTo(a.Score);
         if (scoreComparison != 0)
             return scoreComparison;
-        // 4. Entries with a DateAdded before entries without one, then the oldest first.
+        // 6. Entries with a DateAdded before entries without one, then the oldest first.
         int dateComparison = CompareNullableDateAdded(a.DateAdded, b.DateAdded);
         if (dateComparison != 0)
             return dateComparison;
-        // 5. Smallest SongId first (fully deterministic).
+        // 7. Smallest SongId first (fully deterministic).
         return a.SongId.CompareTo(b.SongId);
     }
 
@@ -114,15 +146,15 @@ public static class SongFileMatching
 
     /// <summary>
     /// Merges a group of entries that all belong to one and the same song into one: the canonical entry
-    /// (see <see cref="ChooseCanonicalEntry"/>) is kept and returned together with the entries that should
-    /// be removed from the database. The kept entry keeps its own counters (score, streak, likes/dislikes
-    /// - the highest-scored entry holds the most complete vote history, the others are dropped with
-    /// theirs). Only the timeless facts are blended into the kept entry:
-    /// - DateAdded becomes the oldest date of the group (null stays null).
-    /// - Volume becomes the loudest (highest) volume of the group, since -1 means "not analyzed yet".
-    /// When fileAlbum/fileArtists are given (an actual song file arbitrated that the entries are the same
-    /// song), entries with exactly these tags win the canonical spot, so a metadata-less duplicate is
-    /// absorbed into the properly tagged entry instead of the other way around.
+    /// (see <see cref="ChooseCanonicalEntry"/> - data-carrying rows win, so score/history is never lost)
+    /// is kept and returned together with the entries that should be removed from the database. Only the
+    /// registration date is blended into the kept entry: DateAdded becomes the oldest date of the group
+    /// (null stays null). The volume keeps the value of the kept (canonical) row - it is a per-file
+    /// measurement of the very song, not cumulative user data, so nothing is merged for it.
+    /// When the kept entry is a metadata-less row that carries the song data while another row of the
+    /// group carries the album/artist of the arbitrating file, the caller should adopt those tags onto
+    /// the kept row AFTER removing the tagged row (see <see cref="TryGetTagsToAdoptOnto"/>), so the
+    /// metadata ends up "where it belongs" without ever colliding with the tagged row's identity.
     /// The caller is responsible for actually removing the returned entries (and their history rows) in
     /// the database. Throws when no entries are given.
     /// </summary>
@@ -135,14 +167,43 @@ public static class SongFileMatching
         UpvotedSong keep = ChooseCanonicalEntry(entries, fileAlbum, fileArtists)!;
         foreach (UpvotedSong entry in entries)
         {
+            // Only the registration date is blended (oldest wins). The volume stays whatever the kept
+            // row has: volume is a per-file measurement of the very song, not cumulative user data, so
+            // there is nothing to "merge" - the canonical row's value is the right one.
             if (entry.DateAdded.HasValue && (!keep.DateAdded.HasValue || entry.DateAdded < keep.DateAdded))
                 keep.DateAdded = entry.DateAdded;
-            if (entry.Volume > keep.Volume)
-                keep.Volume = entry.Volume;
         }
 
         UpvotedSong[] remove = entries.Where(entry => !ReferenceEquals(entry, keep)).ToArray();
         return (keep, remove);
+    }
+
+    /// <summary>
+    /// Decides whether the metadata of the arbitrating file should be adopted onto the kept entry of a
+    /// duplicate merge (see <see cref="MergeSameSongEntries"/>): this is the case when the kept entry
+    /// is metadata-less (it won because it carries the song data, which cannot be recreated) while
+    /// another entry of the group carries exactly the tags of the file. The caller must call this only
+    /// AFTER the tagged row has been removed and saved, otherwise updating the kept row onto the same
+    /// identity would violate the unique index.
+    /// </summary>
+    public static bool TryGetTagsToAdoptOnto(UpvotedSong keep, IEnumerable<UpvotedSong> groupEntries, string? fileAlbum, string? fileArtists, out string adoptAlbum, out string adoptArtists)
+    {
+        adoptAlbum = "";
+        adoptArtists = "";
+        if (fileAlbum == null || fileArtists == null)
+            return false; // No file arbitrated the group
+        if (string.IsNullOrEmpty(fileAlbum) && string.IsNullOrEmpty(fileArtists))
+            return false; // The file itself carries no readable tags - nothing to adopt
+        if (!HasNoAlbumOrArtist(keep.Artist, keep.Album))
+            return false; // The kept entry already carries its tags
+
+        bool anyTaggedRowOfSameFile = groupEntries.Any(entry => TagsEqual(entry.Artist, entry.Album, fileArtists, fileAlbum));
+        if (!anyTaggedRowOfSameFile)
+            return false;
+
+        adoptAlbum = fileAlbum;
+        adoptArtists = fileArtists;
+        return true;
     }
 
     /// <summary>
