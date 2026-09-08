@@ -151,10 +151,10 @@ public static class SongFileMatching
     /// registration date is blended into the kept entry: DateAdded becomes the oldest date of the group
     /// (null stays null). The volume keeps the value of the kept (canonical) row - it is a per-file
     /// measurement of the very song, not cumulative user data, so nothing is merged for it.
-    /// When the kept entry is a metadata-less row that carries the song data while another row of the
-    /// group carries the album/artist of the arbitrating file, the caller should adopt those tags onto
-    /// the kept row AFTER removing the tagged row (see <see cref="TryGetTagsToAdoptOnto"/>), so the
-    /// metadata ends up "where it belongs" without ever colliding with the tagged row's identity.
+    /// When the kept entry carries less metadata than another row of the group (it won because it holds
+    /// the song data, which cannot be recreated), the caller should fill its EMPTY tag fields from the
+    /// combined tags of the group AFTER removing the other rows (see <see cref="TryFillMissingTags"/>),
+    /// so the metadata ends up "where it belongs" without ever colliding with another row's identity.
     /// The caller is responsible for actually removing the returned entries (and their history rows) in
     /// the database. Throws when no entries are given.
     /// </summary>
@@ -179,31 +179,47 @@ public static class SongFileMatching
     }
 
     /// <summary>
-    /// Decides whether the metadata of the arbitrating file should be adopted onto the kept entry of a
-    /// duplicate merge (see <see cref="MergeSameSongEntries"/>): this is the case when the kept entry
-    /// is metadata-less (it won because it carries the song data, which cannot be recreated) while
-    /// another entry of the group carries exactly the tags of the file. The caller must call this only
-    /// AFTER the tagged row has been removed and saved, otherwise updating the kept row onto the same
-    /// identity would violate the unique index.
+    /// Combines the album/artist tags of entries that describe one and the same song into a single tag
+    /// set, treating empty fields as "not recorded" (rows that differ only because one of them has an
+    /// empty artist or album are still the same song - e.g. metadata that was pruned on one client).
+    /// Returns false when two entries CONTRADICT each other: both carry the same field with different
+    /// non-empty values - those cannot be the same song (genuinely different same-named songs).
+    /// The combined tags are built from the first non-empty value seen per field.
     /// </summary>
-    public static bool TryGetTagsToAdoptOnto(UpvotedSong keep, IEnumerable<UpvotedSong> groupEntries, string? fileAlbum, string? fileArtists, out string adoptAlbum, out string adoptArtists)
+    public static bool TryGetCombinedTags(IEnumerable<UpvotedSong> sameSongEntries, out string artist, out string album)
     {
-        adoptAlbum = "";
-        adoptArtists = "";
-        if (fileAlbum == null || fileArtists == null)
-            return false; // No file arbitrated the group
-        if (string.IsNullOrEmpty(fileAlbum) && string.IsNullOrEmpty(fileArtists))
-            return false; // The file itself carries no readable tags - nothing to adopt
-        if (!HasNoAlbumOrArtist(keep.Artist, keep.Album))
-            return false; // The kept entry already carries its tags
-
-        bool anyTaggedRowOfSameFile = groupEntries.Any(entry => TagsEqual(entry.Artist, entry.Album, fileArtists, fileAlbum));
-        if (!anyTaggedRowOfSameFile)
-            return false;
-
-        adoptAlbum = fileAlbum;
-        adoptArtists = fileArtists;
+        artist = "";
+        album = "";
+        foreach (UpvotedSong entry in sameSongEntries)
+        {
+            if (entry.Artist.Length > 0 && artist.Length > 0 && !string.Equals(artist, entry.Artist, StringComparison.Ordinal))
+                return false; // Two different artists on the same file name: different songs
+            if (entry.Album.Length > 0 && album.Length > 0 && !string.Equals(album, entry.Album, StringComparison.Ordinal))
+                return false; // Two different albums on the same file name: different songs
+            if (artist.Length == 0 && entry.Artist.Length > 0)
+                artist = entry.Artist;
+            if (album.Length == 0 && entry.Album.Length > 0)
+                album = entry.Album;
+        }
         return true;
+    }
+
+    /// <summary>
+    /// Fills the EMPTY tag fields of the kept entry of a duplicate merge from the combined tags of the
+    /// group (see <see cref="TryGetCombinedTags"/>): this is the case when the kept entry won because it
+    /// carries the song data while another entry recorded a field it is missing (e.g. a pruned artist).
+    /// The caller must apply this only AFTER the other rows were removed and saved, otherwise updating
+    /// the kept row onto the same identity would violate the unique index.
+    /// </summary>
+    public static bool TryFillMissingTags(UpvotedSong keep, string combinedAlbum, string combinedArtist, out string? artistToSet, out string? albumToSet)
+    {
+        artistToSet = null;
+        albumToSet = null;
+        if (keep.Artist.Length == 0 && combinedArtist.Length > 0)
+            artistToSet = combinedArtist;
+        if (keep.Album.Length == 0 && combinedAlbum.Length > 0)
+            albumToSet = combinedAlbum;
+        return artistToSet != null || albumToSet != null;
     }
 
     /// <summary>
