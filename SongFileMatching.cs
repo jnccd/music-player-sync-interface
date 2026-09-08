@@ -180,27 +180,56 @@ public static class SongFileMatching
 
     /// <summary>
     /// Combines the album/artist tags of entries that describe one and the same song into a single tag
-    /// set, treating empty fields as "not recorded" (rows that differ only because one of them has an
-    /// empty artist or album are still the same song - e.g. metadata that was pruned on one client).
-    /// Returns false when two entries CONTRADICT each other: both carry the same field with different
-    /// non-empty values - those cannot be the same song (genuinely different same-named songs).
+    /// set, treating empty fields as "not recorded". Returns false (and the caller must NOT merge the
+    /// group) when the entries are not provably the same song:
+    /// 1. Two entries CONTRADICT each other: both carry the same field with different non-empty values
+    ///    - genuinely different same-named songs.
+    /// 2. Two or more entries carry partial tags without sharing a common field: one has only an
+    ///    artist, another only an album - they could be two different same-named songs whose metadata
+    ///    happens to be complementary. (Metadata-less entries - both fields empty - are catch-alls and
+    ///    may merge with anything; a single partially-tagged entry next to metadata-less ones is fine.)
     /// The combined tags are built from the first non-empty value seen per field.
     /// </summary>
     public static bool TryGetCombinedTags(IEnumerable<UpvotedSong> sameSongEntries, out string artist, out string album)
     {
         artist = "";
         album = "";
+        int artistOccurrences = 0; // how many entries carry a (consistent) artist
+        int albumOccurrences = 0;  // how many entries carry a (consistent) album
+        int rowsWithAnyTag = 0;    // how many entries carry any tag at all (a row with both counts once)
+
         foreach (UpvotedSong entry in sameSongEntries)
         {
             if (entry.Artist.Length > 0 && artist.Length > 0 && !string.Equals(artist, entry.Artist, StringComparison.Ordinal))
                 return false; // Two different artists on the same file name: different songs
             if (entry.Album.Length > 0 && album.Length > 0 && !string.Equals(album, entry.Album, StringComparison.Ordinal))
                 return false; // Two different albums on the same file name: different songs
-            if (artist.Length == 0 && entry.Artist.Length > 0)
-                artist = entry.Artist;
-            if (album.Length == 0 && entry.Album.Length > 0)
-                album = entry.Album;
+
+            bool rowHasAnyTag = false;
+            if (entry.Artist.Length > 0)
+            {
+                artistOccurrences++;
+                rowHasAnyTag = true;
+                if (artist.Length == 0)
+                    artist = entry.Artist;
+            }
+            if (entry.Album.Length > 0)
+            {
+                albumOccurrences++;
+                rowHasAnyTag = true;
+                if (album.Length == 0)
+                    album = entry.Album;
+            }
+            if (rowHasAnyTag)
+                rowsWithAnyTag++;
         }
+
+        // With two or more partially-tagged entries, at least one field must actually be SHARED by
+        // several of them (e.g. the same album on both), otherwise the entries could be different
+        // same-named songs with complementary metadata ("artist only" vs "album only").
+        if (rowsWithAnyTag > 1 && artistOccurrences < 2 && albumOccurrences < 2)
+            return false;
+
         return true;
     }
 
